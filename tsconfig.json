@@ -2,9 +2,12 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "types": ["react", "react-native"],
-    "moduleResolution": "node",
+    "module": "esnext",
+    "target": "esnext",
     "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true
-  } 
+    "esModuleInterop": true,
+    "moduleResolution": "node",
+    "skipLibCheck": true,
+    "types": ["react", "react-native"]
+  }
 }

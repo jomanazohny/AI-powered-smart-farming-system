@@ -12,17 +12,16 @@ import {
     Alert, 
     Linking 
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker'; 
+import * as FileSystem from 'expo-file-system/legacy';
 
 // Import icons (assuming Expo is set up to handle basic vector icons)
 import { FontAwesome, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons'; 
 
 // --- CONFIGURATION ---
-const API_KEY = ""; 
-// Using the grounded model for reliable, up-to-date farming advice
-const ADVISOR_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=" + API_KEY;
-// Using the Vision model for diagnosis (placeholder URL)
-const VISION_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=" + API_KEY;
-
+const API_KEY = "AIzaSyAVdKFVZhGqJvxW_4B7koH8Ahi2yY06yGQ"; // <-- Replace with your actual Gemini API Key
+const ADVISOR_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + API_KEY;
+const DIAGNOSIS_SERVER_URL = "http://192.168.1.110:5000/diagnose";
 // --- TYPESCRIPT INTERFACES ---
 interface Source {
     uri: string;
@@ -38,33 +37,33 @@ interface AdviceState {
 
 type Screen = 'advisor' | 'diagnosis' | 'market' | 'chat';
 
-// --- UTILITY FUNCTIONS ---
+// --- UTILITY FUNCTIONS (fetchWithRetry and renderMarkdown remain the same) ---
 
 // Function to handle exponential backoff for API calls
 const fetchWithRetry = async (url: string, options: RequestInit, maxRetries = 5): Promise<Response> => {
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      const response = await fetch(url, options);
-      if (!response.ok) {
-        const errorDetail = await response.text();
-        console.error(`Attempt ${attempt + 1} failed with status ${response.status}: ${errorDetail}`);
-        throw new Error(`HTTP error! Status: ${response.status}. Detail: ${errorDetail.substring(0, 100)}...`);
-      }
-      return response;
-    } catch (error: any) {
-      if (attempt < maxRetries - 1) {
-        const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
-        console.warn(`Attempt ${attempt + 1} failed. Retrying in ${delay / 1000}s...`, error.message);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      } else {
-        throw new Error("API request failed after multiple retries: " + error.message);
-      }
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            const response = await fetch(url, options);
+            if (!response.ok) {
+                const errorDetail = await response.text();
+                console.error(`Attempt ${attempt + 1} failed with status ${response.status}: ${errorDetail}`);
+                throw new Error(`HTTP error! Status: ${response.status}. Detail: ${errorDetail.substring(0, 100)}...`);
+            }
+            return response;
+        } catch (error: any) {
+            if (attempt < maxRetries - 1) {
+                const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                console.warn(`Attempt ${attempt + 1} failed. Retrying in ${delay / 1000}s...`, error.message);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                throw new Error("API request failed after multiple retries: " + error.message);
+            }
+        }
     }
-  }
-  throw new Error("Exhausted all retry attempts."); 
+    throw new Error("Exhausted all retry attempts."); 
 };
 
-// Simple markdown rendering for React Native Text (handling bold and basic lists)
+// Simple markdown rendering for React Native Text
 const renderMarkdown = (markdownText: string | null): React.ReactNode => {
     if (!markdownText) return <Text style={styles.adviceText} />;
 
@@ -74,40 +73,33 @@ const renderMarkdown = (markdownText: string | null): React.ReactNode => {
     lines.forEach((line, index) => {
         let content = line.trim();
 
-        // 1. Handle Headings
         if (content.startsWith('## ')) {
             elements.push(<Text key={index} style={styles.h2}>{content.substring(3).trim()}</Text>);
             return;
         }
 
-        // 2. Handle List Items
         if (content.startsWith('* ') || content.startsWith('- ')) {
             elements.push(<Text key={index} style={styles.listItem}>• {content.substring(2).trim()}</Text>);
             return;
         }
 
-        // 3. Handle Paragraphs and Inline Formatting (Bold)
         if (content.length > 0) {
             const parts: React.ReactNode[] = [];
             let remainingText = content;
             let key = 0;
 
-            // Simple regex for **bold**
             const boldRegex = /\*\*(.*?)\*\*/g;
             let match;
             let lastIndex = 0;
 
             while ((match = boldRegex.exec(remainingText)) !== null) {
-                // Text before bold
                 if (match.index > lastIndex) {
                     parts.push(<Text key={key++} style={styles.adviceText}>{remainingText.substring(lastIndex, match.index)}</Text>);
                 }
-                // Bold text
                 parts.push(<Text key={key++} style={styles.adviceTextBold}>{match[1]}</Text>);
                 lastIndex = match.index + match[0].length;
             }
 
-            // Remaining text after last match
             if (lastIndex < remainingText.length) {
                 parts.push(<Text key={key++} style={styles.adviceText}>{remainingText.substring(lastIndex)}</Text>);
             }
@@ -138,7 +130,6 @@ const AdvisorScreen: React.FC<{
 
     const { text, isLoading, sources, error } = adviceState;
 
-    // Helper to open links (or show alert if Linking fails)
     const handleSourcePress = (uri: string) => {
         Linking.openURL(uri).catch(() => Alert.alert("فشل فتح الرابط", `تعذر فتح الرابط: ${uri}`, [{ text: "حسناً" }]));
     };
@@ -170,7 +161,6 @@ const AdvisorScreen: React.FC<{
                     placeholderTextColor="#9ca3af"
                     value={crop}
                     onChangeText={setCrop}
-                    // Arabic keyboard adjustments
                     keyboardAppearance='default'
                 />
 
@@ -252,23 +242,77 @@ const AdvisorScreen: React.FC<{
     );
 };
 
-// --- DISEASE DIAGNOSIS SCREEN ---
+// --- DISEASE DIAGNOSIS SCREEN (UPDATED for Custom ML Server) ---
 const DiagnosisScreen: React.FC = () => {
     const [imageUri, setImageUri] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [diagnosis, setDiagnosis] = useState('');
+    const [cropType, setCropType] = useState('potato'); // State for selected crop (must match server keys)
 
-    const handleImagePickAndDiagnose = () => {
-        // Message updated to remove any reference to AI models
-        Alert.alert(
-            "تفعيل الميزة",
-            "تتطلب هذه الميزة التقاط صورة أو اختيارها من المعرض لتحليلها بواسطة **نظام التشخيص الذكي**. يرجى تفعيل الكاميرا أو معرض الصور في التطبيق.",
-            [{ text: "حسناً" }]
-        );
+    // 1. Function to handle sending data to the Flask server
+    const diagnoseImage = useCallback(async (localUri: string) => {
+        setIsLoading(true);
+        setDiagnosis('');
 
-        setDiagnosis(''); 
-        setImageUri(null); 
-    };
+        try {
+           const base64Image = await FileSystem.readAsStringAsync(localUri, {
+    encoding: 'base64', // <--- Use the string literal 'base64' as a fallback/fix
+});
+
+            // Send the Base64 image data to the custom ML server
+            const response = await fetch(DIAGNOSIS_SERVER_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ image: base64Image, crop_type: cropType }), // Sending crop_type
+            });
+
+            if (!response.ok) {
+                const errorDetail = await response.text();
+                throw new Error(`Server Error: ${response.status}. Detail: ${errorDetail}`);
+            }
+
+            const result = await response.json();
+            
+            // Format the diagnosis result from the server
+            const diagnosisText = `**المرض:** ${result.disease || 'غير معروف'}\n\n**العلاج المقترح:**\n${result.treatment || 'لا يوجد علاج مقترح.'}`;
+            
+            setDiagnosis(diagnosisText);
+
+        } catch (e: any) {
+            console.error("Diagnosis failed:", e);
+            Alert.alert("خطأ في التشخيص", `فشل الاتصال بالخادم. التفاصيل: ${e.message}`, [{ text: "حسناً" }]);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [cropType]);
+
+
+    // 2. Function to handle image picking
+    const handleImagePickAndDiagnose = useCallback(async () => {
+        // Request media library permissions
+        const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+        if (permissionResult.granted === false) {
+            Alert.alert("الإذن مطلوب", "يجب تفعيل إذن الوصول إلى معرض الصور للتشخيص.", [{ text: "حسناً" }]);
+            return;
+        }
+
+        let pickerResult = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [4, 3],
+            quality: 0.8,
+        });
+
+        if (!pickerResult.canceled && pickerResult.assets && pickerResult.assets.length > 0) {
+            const uri = pickerResult.assets[0].uri;
+            setImageUri(uri);
+            await diagnoseImage(uri);
+        }
+    }, [diagnoseImage]);
+
 
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
@@ -278,21 +322,51 @@ const DiagnosisScreen: React.FC = () => {
             </View>
 
             <View style={[styles.card, { alignItems: 'center', padding: 20 }]}>
-                <TouchableOpacity style={styles.imagePlaceholder} onPress={handleImagePickAndDiagnose}>
-                    <MaterialCommunityIcons name="camera-iris" size={80} color="#388e3c" />
+                
+                {/* Crop Type Selection */}
+                <Text style={styles.inputLabel}>اختر المحصول:</Text>
+                <View style={styles.cropSelector}>
+                    {['potato', 'mango', 'wheat'].map((crop) => ( 
+                        <TouchableOpacity
+                            key={crop}
+                            style={[styles.cropButton, cropType === crop && styles.cropButtonActive]}
+                            onPress={() => setCropType(crop)}
+                            disabled={isLoading}
+                        >
+                            <Text style={[styles.cropText, cropType === crop && styles.cropTextActive]}>
+                                {crop === 'potato' ? 'البطاطس' : (crop === 'mango' ? 'المانجو' : 'القمح')}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+
+
+                {/* Image Placeholder/Picker */}
+                <TouchableOpacity 
+                    style={styles.imagePlaceholder} 
+                    onPress={handleImagePickAndDiagnose}
+                    disabled={isLoading}
+                >
+                    <MaterialCommunityIcons 
+                        name={imageUri ? "check-circle" : "camera-iris"} 
+                        size={80} 
+                        color={imageUri ? "#2e7d32" : "#388e3c"} 
+                    />
                     <Text style={styles.imagePlaceholderText}>
                         {imageUri ? 'الصورة جاهزة' : 'اضغط للالتقاط/الاختيار'}
                     </Text>
                 </TouchableOpacity>
                 
                 <TouchableOpacity
-                    style={[styles.buttonPrimary, {marginTop: 20, width: '100%'}]}
+                    style={[styles.buttonPrimary, {marginTop: 20, width: '100%'}, isLoading && styles.buttonDisabled]}
                     onPress={handleImagePickAndDiagnose}
                     disabled={isLoading}
                 >
-                    <Text style={styles.buttonText}>
-                        {isLoading ? 'جاري التشخيص...' : 'تشخيص المرض'}
-                    </Text>
+                    {isLoading ? (
+                        <ActivityIndicator color="#fff" />
+                    ) : (
+                        <Text style={styles.buttonText}>تشخيص المرض</Text>
+                    )}
                 </TouchableOpacity>
 
                 {diagnosis.length > 0 && (
@@ -307,13 +381,13 @@ const DiagnosisScreen: React.FC = () => {
     );
 };
 
-// --- MARKET & RESOURCE MANAGEMENT SCREEN ---
+// --- MARKET & RESOURCE MANAGEMENT SCREEN (Placeholders) ---
 const MarketScreen: React.FC = () => {
+    // ... (MarketScreen code remains the same as provided earlier) ...
     const [chatInput, setChatInput] = useState('');
 
     const handleSendChat = () => {
         if (!chatInput.trim()) return;
-        // Message updated to remove any reference to AI models
         Alert.alert(
             "خدمة الشات الصوتي",
             `الرسالة: "${chatInput}" \n\n تتطلب هذه الميزة التكامل مع **نظام محادثة ذكي** لتوفير تجربة التفاعل الصوتي والكتابي باللغة العربية.`,
@@ -364,7 +438,6 @@ const MarketScreen: React.FC = () => {
                         value={chatInput}
                         onChangeText={setChatInput}
                         textAlign='right'
-                        // Arabic keyboard adjustments
                         keyboardAppearance='default'
                     />
                     <TouchableOpacity style={styles.chatSendButton} onPress={handleSendChat}>
@@ -376,6 +449,7 @@ const MarketScreen: React.FC = () => {
         </ScrollView>
     );
 };
+
 
 // --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
@@ -477,7 +551,6 @@ const App: React.FC = () => {
             case 'market':
                 return <MarketScreen />;
             default:
-                // Default to advisor screen
                 return (
                     <AdvisorScreen 
                         adviceState={adviceState}
@@ -532,14 +605,14 @@ const App: React.FC = () => {
     );
 };
 
-// --- STYLES ---
+// --- STYLES (Styles remain the same as provided earlier) ---
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
-        backgroundColor: '#e8f5e9', // Light green background
+        backgroundColor: '#e8f5e9',
     },
     header: {
-        backgroundColor: '#388e3c', // Dark green header
+        backgroundColor: '#388e3c',
         padding: 16,
         alignItems: 'center',
         ...Platform.select({
@@ -591,13 +664,13 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         color: '#388e3c',
         marginBottom: 4,
-        textAlign: 'right', 
+        textAlign: 'right',
     },
     subtitle: {
         fontSize: 14,
         color: '#666',
         marginBottom: 12,
-        textAlign: 'right', 
+        textAlign: 'right',
     },
     inputLabel: {
         fontSize: 14,
@@ -605,7 +678,7 @@ const styles = StyleSheet.create({
         color: '#333',
         marginTop: 12,
         marginBottom: 4,
-        textAlign: 'right', 
+        textAlign: 'right',
     },
     textInput: {
         height: 48,
@@ -666,7 +739,7 @@ const styles = StyleSheet.create({
         padding: 12,
         borderRadius: 8,
         marginBottom: 15,
-        flexDirection: 'row-reverse', 
+        flexDirection: 'row-reverse',
         flexWrap: 'wrap',
     },
     errorTextBold: {
@@ -686,7 +759,7 @@ const styles = StyleSheet.create({
     reportCard: {
         borderLeftWidth: 8,
         borderLeftColor: '#388e3c',
-        backgroundColor: '#f0fff0', // Very light green background
+        backgroundColor: '#f0fff0',
         padding: 20,
     },
     reportHeader: {
@@ -700,7 +773,6 @@ const styles = StyleSheet.create({
         textAlign: 'right',
     },
     adviceContent: {
-        // Container for markdown content
     },
     adviceText: {
         fontSize: 15,
@@ -725,12 +797,12 @@ const styles = StyleSheet.create({
         fontSize: 15,
         color: '#333',
         lineHeight: 24,
-        paddingRight: 15, // Indent for list
+        paddingRight: 15,
         textAlign: 'right',
     },
     paragraph: {
         marginBottom: 10,
-        flexDirection: 'row-reverse', // Ensure text flows correctly
+        flexDirection: 'row-reverse',
         flexWrap: 'wrap',
     },
     sourcesContainer: {
@@ -755,6 +827,31 @@ const styles = StyleSheet.create({
     },
 
     // Diagnosis Screen
+    cropSelector: {
+        flexDirection: 'row-reverse',
+        justifyContent: 'space-around',
+        width: '100%',
+        marginBottom: 20,
+    },
+    cropButton: {
+        paddingVertical: 10,
+        paddingHorizontal: 15,
+        borderRadius: 20,
+        backgroundColor: '#f1f8e9',
+        borderWidth: 1,
+        borderColor: '#a5d6a7',
+    },
+    cropButtonActive: {
+        backgroundColor: '#388e3c',
+        borderColor: '#1b5e20',
+    },
+    cropText: {
+        color: '#388e3c',
+        fontWeight: '600',
+    },
+    cropTextActive: {
+        color: '#fff',
+    },
     imagePlaceholder: {
         width: 150,
         height: 150,
@@ -803,7 +900,7 @@ const styles = StyleSheet.create({
     
     // Chatbot
     chatHeader: {
-        flexDirection: 'row-reverse', // RTL alignment
+        flexDirection: 'row-reverse',
         alignItems: 'center',
         paddingBottom: 10,
         borderBottomWidth: 1,
@@ -824,10 +921,10 @@ const styles = StyleSheet.create({
         marginBottom: 10,
         borderWidth: 1,
         borderColor: '#e0e0e0',
-        overflow: 'hidden', // Placeholder for scroll
+        overflow: 'hidden',
     },
     chatInputContainer: {
-        flexDirection: 'row-reverse', // RTL layout for input
+        flexDirection: 'row-reverse',
         alignItems: 'center',
     },
     chatTextInput: {
@@ -865,7 +962,7 @@ const styles = StyleSheet.create({
         borderTopColor: '#eee',
         ...Platform.select({
             ios: {
-                paddingBottom: 30, // Account for iPhone safe area
+                paddingBottom: 30,
             },
         }),
     },
