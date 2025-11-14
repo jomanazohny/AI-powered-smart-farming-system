@@ -15,14 +15,11 @@ import {
 import * as ImagePicker from 'expo-image-picker'; 
 import * as FileSystem from 'expo-file-system/legacy';
 
-// Import icons (assuming Expo is set up to handle basic vector icons)
 import { FontAwesome, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons'; 
 
-// --- CONFIGURATION ---
-const API_KEY = "AIzaSyAVdKFVZhGqJvxW_4B7koH8Ahi2yY06yGQ"; // <-- Replace with your actual Gemini API Key
+const API_KEY = "AIzaSyAVdKFVZhGqJvxW_4B7koH8Ahi2yY06yGQ"; 
 const ADVISOR_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + API_KEY;
 const DIAGNOSIS_SERVER_URL = "http://192.168.1.110:5000/diagnose";
-// --- TYPESCRIPT INTERFACES ---
 interface Source {
     uri: string;
     title: string;
@@ -37,9 +34,7 @@ interface AdviceState {
 
 type Screen = 'advisor' | 'diagnosis' | 'market' | 'chat';
 
-// --- UTILITY FUNCTIONS (fetchWithRetry and renderMarkdown remain the same) ---
 
-// Function to handle exponential backoff for API calls
 const fetchWithRetry = async (url: string, options: RequestInit, maxRetries = 5): Promise<Response> => {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
@@ -63,7 +58,6 @@ const fetchWithRetry = async (url: string, options: RequestInit, maxRetries = 5)
     throw new Error("Exhausted all retry attempts."); 
 };
 
-// Simple markdown rendering for React Native Text
 const renderMarkdown = (markdownText: string | null): React.ReactNode => {
     if (!markdownText) return <Text style={styles.adviceText} />;
 
@@ -111,7 +105,6 @@ const renderMarkdown = (markdownText: string | null): React.ReactNode => {
     return <View>{elements}</View>;
 };
 
-// --- ADVISOR SCREEN (Input & Result) ---
 
 const AdvisorScreen: React.FC<{
     adviceState: AdviceState;
@@ -242,30 +235,27 @@ const AdvisorScreen: React.FC<{
     );
 };
 
-// --- DISEASE DIAGNOSIS SCREEN (UPDATED for Custom ML Server) ---
 const DiagnosisScreen: React.FC = () => {
     const [imageUri, setImageUri] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [diagnosis, setDiagnosis] = useState('');
-    const [cropType, setCropType] = useState('potato'); // State for selected crop (must match server keys)
+    const [cropType, setCropType] = useState('potato'); 
 
-    // 1. Function to handle sending data to the Flask server
     const diagnoseImage = useCallback(async (localUri: string) => {
         setIsLoading(true);
         setDiagnosis('');
 
         try {
            const base64Image = await FileSystem.readAsStringAsync(localUri, {
-    encoding: 'base64', // <--- Use the string literal 'base64' as a fallback/fix
+    encoding: 'base64', 
 });
 
-            // Send the Base64 image data to the custom ML server
             const response = await fetch(DIAGNOSIS_SERVER_URL, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ image: base64Image, crop_type: cropType }), // Sending crop_type
+                body: JSON.stringify({ image: base64Image, crop_type: cropType }), 
             });
 
             if (!response.ok) {
@@ -275,7 +265,6 @@ const DiagnosisScreen: React.FC = () => {
 
             const result = await response.json();
             
-            // Format the diagnosis result from the server
             const diagnosisText = `**المرض:** ${result.disease || 'غير معروف'}\n\n**العلاج المقترح:**\n${result.treatment || 'لا يوجد علاج مقترح.'}`;
             
             setDiagnosis(diagnosisText);
@@ -289,9 +278,7 @@ const DiagnosisScreen: React.FC = () => {
     }, [cropType]);
 
 
-    // 2. Function to handle image picking
     const handleImagePickAndDiagnose = useCallback(async () => {
-        // Request media library permissions
         const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
         if (permissionResult.granted === false) {
@@ -381,9 +368,7 @@ const DiagnosisScreen: React.FC = () => {
     );
 };
 
-// --- MARKET & RESOURCE MANAGEMENT SCREEN (Placeholders) ---
 const MarketScreen: React.FC = () => {
-    // ... (MarketScreen code remains the same as provided earlier) ...
     const [chatInput, setChatInput] = useState('');
 
     const handleSendChat = () => {
@@ -451,11 +436,9 @@ const MarketScreen: React.FC = () => {
 };
 
 
-// --- MAIN APP COMPONENT ---
 const App: React.FC = () => {
     const [currentScreen, setCurrentScreen] = useState<Screen>('advisor');
     
-    // State for Advisor Screen
     const [crop, setCrop] = useState('قمح');
     const [landSize, setLandSize] = useState('5 فدان');
     const [soilType, setSoilType] = useState('تربة طينية');
@@ -466,13 +449,11 @@ const App: React.FC = () => {
         error: null,
     });
     
-    // Function to display errors to the user
     const displayError = (title: string, message: string) => {
         setAdviceState(prev => ({ ...prev, error: `${title}: ${message}` }));
         setTimeout(() => setAdviceState(prev => ({ ...prev, error: null })), 5000);
     };
 
-    // Function to reset all inputs and outputs
     const resetForm = useCallback(() => {
         setCrop('');
         setLandSize('');
@@ -480,7 +461,6 @@ const App: React.FC = () => {
         setAdviceState({ text: '', sources: [], isLoading: false, error: null });
     }, []);
 
-    // Function to call the API for general farming advice
     const getFarmingAdvice = useCallback(async () => {
         if (!crop || !landSize || !soilType) {
             displayError('معلومات ناقصة', 'يرجى ملء جميع الحقول المطلوبة (المحصول، الحجم، نوع التربة).');
@@ -532,7 +512,6 @@ const App: React.FC = () => {
         }
     }, [crop, landSize, soilType]);
 
-    // --- RENDER CONTENT ---
     const renderContent = () => {
         switch (currentScreen) {
             case 'advisor':
@@ -564,7 +543,6 @@ const App: React.FC = () => {
         }
     };
 
-    // --- BOTTOM NAVIGATION ---
     const NavItem: React.FC<{ 
         screen: Screen, 
         icon: keyof typeof FontAwesome.glyphMap | keyof typeof MaterialCommunityIcons.glyphMap | keyof typeof MaterialIcons.glyphMap, 
@@ -605,7 +583,6 @@ const App: React.FC = () => {
     );
 };
 
-// --- STYLES (Styles remain the same as provided earlier) ---
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
@@ -691,7 +668,6 @@ const styles = StyleSheet.create({
         textAlign: 'right',
         backgroundColor: '#f9f9f9',
     },
-    // Buttons
     buttonGroup: {
         flexDirection: 'row',
         marginTop: 20,
@@ -731,7 +707,6 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
     },
 
-    // Error Box
     errorBox: {
         backgroundColor: '#ffebee',
         borderColor: '#e57373',
@@ -755,7 +730,6 @@ const styles = StyleSheet.create({
         textAlign: 'right',
     },
 
-    // Report Output
     reportCard: {
         borderLeftWidth: 8,
         borderLeftColor: '#388e3c',
@@ -826,7 +800,6 @@ const styles = StyleSheet.create({
         textAlign: 'right',
     },
 
-    // Diagnosis Screen
     cropSelector: {
         flexDirection: 'row-reverse',
         justifyContent: 'space-around',
@@ -870,7 +843,6 @@ const styles = StyleSheet.create({
         fontSize: 12,
     },
 
-    // Market Screen
     featureGrid: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -898,7 +870,6 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
     
-    // Chatbot
     chatHeader: {
         flexDirection: 'row-reverse',
         alignItems: 'center',
@@ -952,7 +923,6 @@ const styles = StyleSheet.create({
         elevation: 5,
     },
 
-    // Bottom Navigation
     bottomNav: {
         flexDirection: 'row',
         justifyContent: 'space-around',
